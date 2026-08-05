@@ -1,0 +1,62 @@
+# =============================================================================
+# sdkconfig.defaults — PCAN-USB ESP32-S3 emulator
+# Applied on a fresh build; edit via `idf.py menuconfig` to experiment.
+# =============================================================================
+
+# --- Target -----------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Board: ESP32-S3-PICO-1, 8 MB embedded flash + 8 MB embedded PSRAM -------
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# Single native-USB port: boot console over USB-Serial-JTAG until the app hands
+# the USB PHY to TinyUSB for the PCAN device (after which boot logs stop and the
+# port re-enumerates as 0c72:000c).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Don't panic at boot if the PSRAM mode guess is wrong — ringbuf falls back to
+# internal RAM (the 8 MB embedded PSRAM on S3-PICO is octal; see CONFIG below).
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# --- TinyUSB (esp_tinyusb) --------------------------------------------------
+# Enable the component. We do NOT use the built-in TinyUSB vendor class: it
+# hardcodes two endpoints per interface and cannot express the real PCAN-USB's
+# single vendor interface that owns all four bulk endpoints. Instead usb_glue.c
+# registers a CUSTOM usbd_class_driver_t (via usbd_app_driver_get_cb) that owns
+# EP 0x01/0x81/0x02/0x82 directly. So CFG_TUD_VENDOR must be 0.
+CONFIG_TINYUSB=y
+CONFIG_TINYUSB_VENDOR_COUNT=0
+# We supply a full custom device descriptor (VID 0x0C72 / PID 0x000C) at
+# install time, so the Kconfig VID/PID defaults are irrelevant.
+CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=n
+CONFIG_TINYUSB_DESC_USE_DEFAULT_PID=n
+# The internal TinyUSB service task drives our class driver's xfer_cb (EP2-IN
+# ships, EP2-OUT/EP1 receive). Raise it above usb_tx_task (CFG_TASK_USBTX_PRIO=
+# 10) so a busy RX drain on core 0 cannot starve USB servicing (DESIGN §2).
+CONFIG_TINYUSB_TASK_PRIORITY=11
+
+# --- PSRAM (8 MB octal, embedded in the ESP32-S3-PICO-1 module) --------------
+# Ring buffers are heap_caps_malloc(MALLOC_CAP_SPIRAM). Adjust MODE to QUAD if
+# your module uses quad PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# Keep small allocations in internal RAM; only our explicit CAP_SPIRAM allocs
+# land in PSRAM.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# --- TWAI (classic CAN) -----------------------------------------------------
+# Keep the ISR in IRAM so RX is not starved during flash operations, and place
+# the driver's control in IRAM for latency.
+CONFIG_TWAI_ISR_IN_IRAM=y
+
+# --- FreeRTOS / clocks ------------------------------------------------------
+# 1000 Hz tick gives 1 ms task granularity for ISO-TP timers and batch pacing.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# --- Logging (quieter for release; raise to INFO/DEBUG while bringing up) ----
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# --- Partition table --------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

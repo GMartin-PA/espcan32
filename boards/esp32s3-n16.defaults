@@ -1,0 +1,14 @@
+# esp32s3-n16 — 16 MB flash, no PSRAM
+#
+# Overlay on sdkconfig.defaults. Build with:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-n16.defaults" build
+
+# --- flash ---------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# --- PSRAM ---------------------------------------------------------------
+# No PSRAM on this module. ringbuf falls back to internal RAM; the rings are
+# ~30 KB, so nothing is lost but the headroom.
+CONFIG_SPIRAM=n
+

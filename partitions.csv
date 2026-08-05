@@ -1,0 +1,11 @@
+# Partition table for the PCAN-USB ESP32-S3 emulator (8 MB flash, matching
+# CONFIG_ESPTOOLPY_FLASHSIZE_8MB). A single large app partition + NVS (mode
+# persistence) + phy_init. The table ends at 0x10000 + 0x300000 = 0x310000
+# (3,211,264 B ≈ 3.06 MiB), well inside the 8 MB device, so it also fits any
+# larger flash — but CONFIG_ESPTOOLPY_FLASHSIZE must match the module.
+# No OTA: this is a bench tool flashed over USB/JTAG, not field-updated.
+#
+# Name,   Type, SubType, Offset,   Size,   Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x300000,

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Maciej Wilczyński <m@lupin.pl>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Managed component dependencies.
+#
+# esp_tinyusb 2.2.x is required: the firmware uses the v2.x nested
+# `descriptor.*` config API + TINYUSB_DEFAULT_CONFIG() (see usb_glue.c). v2.2.1
+# depends on espressif/tinyusb >= 0.17.0~2 and needs ESP-IDF >= 5.3. If your IDF
+# only offers esp_tinyusb 1.x, switch usb_glue.c to the flat-field
+# tinyusb_config_t API (documented inline there) and relax this to "^1.7.0".
+#
+# The built-in TinyUSB vendor class is DISABLED (CONFIG_TINYUSB_VENDOR_COUNT=0
+# in sdkconfig.defaults); usb_glue.c registers a custom usbd_class_driver_t that
+# owns the single 4-endpoint vendor interface.
+dependencies:
+  idf: ">=5.3"
+  espressif/esp_tinyusb: "~2.2.1"

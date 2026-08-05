@@ -1,0 +1,226 @@
+# SPDX-FileCopyrightText: 2026 Maciej Wilczyński <m@lupin.pl>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Builds every supported board variant on each push to main and publishes the
+# binaries as a GitHub release tagged YYYYMMDDNN.
+#
+# The whole workflow is serialised through one concurrency group: the NN suffix
+# is derived from the releases and tags that already exist, so two runs racing
+# on the same day would both compute the same number and the second would fail
+# to create its tag.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Gate the release on the host suite. These compile the real modules out
+      # of main/ under ASan/UBSan, so a failure here means the firmware is
+      # broken, not that the test rig is.
+      - name: Run host test suite
+        run: ./test/host/run_tests.sh
+
+  version:
+    name: Allocate version
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.alloc.outputs.tag }}
+      date: ${{ steps.alloc.outputs.date }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: alloc
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          day=$(date -u +%Y%m%d)
+
+          # Look at both releases and bare tags. A tag without a release would
+          # otherwise be invisible here and collide when we try to create ours.
+          existing=$(
+            {
+              gh release list --limit 200 --json tagName --jq '.[].tagName' || true
+              git tag --list "${day}??" || true
+            } | sort -u
+          )
+          last=$(printf '%s\n' "$existing" | grep -E "^${day}[0-9]{2}$" | sort | tail -n1 || true)
+
+          if [ -z "$last" ]; then
+            nn=00
+          else
+            next=$(( 10#${last: -2} + 1 ))
+            if [ "$next" -gt 99 ]; then
+              echo "::error::${day} already has 100 releases; the NN field of YYYYMMDDNN is exhausted for today"
+              exit 1
+            fi
+            nn=$(printf '%02d' "$next")
+          fi
+
+          echo "date=${day}"        >> "$GITHUB_OUTPUT"
+          echo "tag=${day}${nn}"    >> "$GITHUB_OUTPUT"
+          echo "Allocated release ${day}${nn} (previous today: ${last:-none})"
+
+  build:
+    name: ${{ matrix.board }}
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Espressif module naming: N<flash MB>, R<PSRAM MB>.
+        board:
+          - esp32s3-n4
+          - esp32s3-n8
+          - esp32s3-n16
+          - esp32s3-n8r2
+          - esp32s3-n8r8
+          - esp32s3-n16r8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build ${{ matrix.board }}
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: v6.0
+          target: esp32s3
+          path: '.'
+          command: >-
+            idf.py
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/${{ matrix.board }}.defaults"
+            build
+            && idf.py
+            -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/${{ matrix.board }}.defaults"
+            merge-bin -o merged.bin
+
+      - name: Package
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          BOARD: ${{ matrix.board }}
+        run: |
+          set -euo pipefail
+          out="dist"
+          stage="stage/espcan32-${TAG}-${BOARD}"
+          mkdir -p "$out" "$stage"
+
+          cp build/espcan32.bin                     "$stage/"
+          cp build/bootloader/bootloader.bin        "$stage/"
+          cp build/partition_table/partition-table.bin "$stage/"
+          cp build/flasher_args.json                "$stage/"
+          cp "boards/${BOARD}.defaults"             "$stage/sdkconfig.board"
+
+          # A single image flashable at 0x0 with nothing but esptool — this is
+          # what most people actually want.
+          cp build/merged.bin "$out/espcan32-${TAG}-${BOARD}-merged.bin"
+
+          # Record what this actually is, so an unpacked zip is self-describing.
+          {
+            echo "espcan32 ${TAG} — ${BOARD}"
+            echo "commit:  ${GITHUB_SHA}"
+            echo "idf:     v6.0"
+            echo
+            echo "Flash the merged image (recommended):"
+            echo "  esptool --chip esp32s3 write-flash 0x0 espcan32-${TAG}-${BOARD}-merged.bin"
+            echo
+            echo "Or the individual images, from inside this directory"
+            echo "(paths are flattened here, unlike in the build tree):"
+            python3 - <<'PY'
+          import json, os
+          a = json.load(open('build/flasher_args.json'))
+          parts = ' '.join(f'{off} {os.path.basename(f)}'
+                           for off, f in sorted(a['flash_files'].items(),
+                                                key=lambda kv: int(kv[0], 16)))
+          print(f'  esptool --chip esp32s3 write-flash {parts}')
+          PY
+          } > "$stage/README.txt"
+
+          (cd stage && zip -qr "../$out/espcan32-${TAG}-${BOARD}.zip" "espcan32-${TAG}-${BOARD}")
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: espcan32-${{ matrix.board }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish ${{ needs.version.outputs.tag }}
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * | tee SHA256SUMS.txt
+
+      - name: Release notes
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Automated build of \`main\` at commit ${GITHUB_SHA}.
+
+          ### Which file do I want?
+
+          Take the \`-merged.bin\` for your module and flash it at offset 0:
+
+          \`\`\`
+          esptool --chip esp32s3 write-flash 0x0 espcan32-${TAG}-<board>-merged.bin
+          \`\`\`
+
+          The matching \`.zip\` holds the separate app / bootloader /
+          partition-table images and the exact board config used, if you would
+          rather flash them individually.
+
+          | Asset | Flash | PSRAM |
+          |---|---|---|
+          | \`esp32s3-n4\` | 4 MB | none |
+          | \`esp32s3-n8\` | 8 MB | none |
+          | \`esp32s3-n16\` | 16 MB | none |
+          | \`esp32s3-n8r2\` | 8 MB | 2 MB quad |
+          | \`esp32s3-n8r8\` | 8 MB | 8 MB octal |
+          | \`esp32s3-n16r8\` | 16 MB | 8 MB octal |
+
+          PSRAM is optional — the ring buffers fall back to internal RAM — so a
+          no-PSRAM image is a fine choice if you are unsure. The flash size must
+          match your module or the bootloader reports a mismatch at boot.
+          EOF
+          cat notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+            dist/*

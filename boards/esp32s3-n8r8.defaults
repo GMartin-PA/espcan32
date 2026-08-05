@@ -1,0 +1,12 @@
+# esp32s3-n8r8 — 8 MB flash, 8 MB octal PSRAM (ESP32-S3-PICO-1, the validated board)
+#
+# Overlay on sdkconfig.defaults. Build with:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-n8r8.defaults" build
+
+# --- flash ---------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# --- PSRAM ---------------------------------------------------------------
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
