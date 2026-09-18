@@ -110,10 +110,7 @@ static esp_err_t timing_for_bitrate(uint32_t bitrate, twai_timing_config_t *out)
  */
 static void twai_set_standby(bool standby)
 {
-    if ((int)CFG_TWAI_STANDBY_GPIO < 0) {
-        return;
-    }
-
+#if CFG_TWAI_STANDBY_GPIO >= 0
     static bool configured = false;
     if (!configured) {
         gpio_config_t io = {
@@ -139,6 +136,9 @@ static void twai_set_standby(bool standby)
     int level = standby ? 0 : 1;
 #endif
     gpio_set_level((gpio_num_t)CFG_TWAI_STANDBY_GPIO, level);
+#else
+    (void)standby;  /* standby pin disabled; nothing to drive */
+#endif
 }
 
 /* -------------------------------------------------------------------------- */
