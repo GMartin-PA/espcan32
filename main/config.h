@@ -25,9 +25,9 @@
  * S3-PICO-1 embedded flash/PSRAM (26-37), and GPIO5/6 (reserved for UART on
  * this board).
  * -------------------------------------------------------------------------- */
-#define CFG_TWAI_TX_GPIO            GPIO_NUM_7
-#define CFG_TWAI_RX_GPIO            GPIO_NUM_8
-#define CFG_TWAI_STANDBY_GPIO       GPIO_NUM_10  /* SN65HVD230 Rs; -1 if Rs tied to GND */
+#define CFG_TWAI_TX_GPIO            GPIO_NUM_15
+#define CFG_TWAI_RX_GPIO            GPIO_NUM_16
+#define CFG_TWAI_STANDBY_GPIO       -1  /* SN65HVD230 Rs; -1 if Rs tied to GND */
 #define CFG_TWAI_STANDBY_ACTIVE_LOW 1            /* drive low = normal (not standby)*/
 
 /* Optional activity/status LED (mirrors CMD_LED). -1 to disable. */
